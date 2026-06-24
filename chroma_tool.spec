@@ -4,20 +4,35 @@
 Build with:
     pyinstaller --noconfirm chroma_tool.spec
 
-Outputs a single windowed EXE at ``dist/chroma_tool.exe``.  Per-user
-settings and profiles are written at runtime to %APPDATA%\\ChromaTool,
-so nothing else needs to ship alongside the EXE.
+On Windows / Linux this outputs a single windowed executable at
+``dist/chroma_tool`` (``.exe`` on Windows).  On macOS it additionally
+wraps that binary in a double-clickable ``dist/Chroma Tool.app`` bundle.
+Per-user settings and profiles are written at runtime to the user's
+config directory, so nothing else needs to ship alongside the binary.
 """
+import sys
 from pathlib import Path
 
 HERE = Path(SPECPATH).resolve()
+
+APP_VERSION = "2.0.0"
+
+# Optional drag-and-drop support.  tkinterdnd2 ships native tkdnd Tcl
+# binaries that must be collected explicitly; if the package isn't
+# installed we simply build without drag-and-drop (the GUI falls back).
+try:
+    from PyInstaller.utils.hooks import collect_all
+
+    _dnd_datas, _dnd_binaries, _dnd_hiddenimports = collect_all('tkinterdnd2')
+except Exception:
+    _dnd_datas, _dnd_binaries, _dnd_hiddenimports = [], [], []
 
 
 a = Analysis(
     ['gui.py'],
     pathex=[str(HERE)],
-    binaries=[],
-    datas=[],
+    binaries=_dnd_binaries,
+    datas=_dnd_datas,
     hiddenimports=[
         # Pull in every sibling module by name so PyInstaller bundles them
         # even if a future refactor adds a dynamic import.
@@ -31,7 +46,7 @@ a = Analysis(
         'settings',
         'shadows',
         'splitting',
-    ],
+    ] + _dnd_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -71,3 +86,20 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+# On macOS wrap the binary in a proper .app bundle so it can be launched
+# by double-click (a bare Unix executable would open a Terminal instead).
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='Chroma Tool.app',
+        icon=None,
+        bundle_identifier='com.nexuseast.chromatool',
+        version=APP_VERSION,
+        info_plist={
+            'NSHighResolutionCapable': True,
+            'CFBundleShortVersionString': APP_VERSION,
+            'CFBundleVersion': APP_VERSION,
+            'NSRequiresAquaSystemAppearance': False,
+        },
+    )

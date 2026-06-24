@@ -1,3 +1,11 @@
 opencv-python>=4.8
 numpy>=1.24
 Pillow>=10.0
+# Optional: enables drag-and-drop of images/folders into the batch list.
+# The GUI degrades gracefully (no drag-and-drop) if it can't be loaded.
+#
+# Pinned to 0.4.2 on purpose: it bundles a tkdnd built for Tcl/Tk 8.6,
+# which is what the python.org macOS builds (and most others) still ship.
+# 0.5.0 ships a Tcl 9-only binary that fails to load on a Tcl 8.6
+# interpreter with "interpreter uses an incompatible stubs mechanism".
+tkinterdnd2==0.4.2

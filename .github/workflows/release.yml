@@ -1,0 +1,80 @@
+name: Build & Release
+
+# Build Windows + macOS executables with PyInstaller and publish them as
+# zipped assets on a GitHub Release.  Triggered by pushing a version tag
+# (e.g. v2.0.0), or manually via the Actions tab.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create / update (e.g. v2.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: chroma_tool-windows-x64
+          - os: macos-latest
+            asset: chroma_tool-macos-arm64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm chroma_tool.spec
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/chroma_tool.exe -DestinationPath "${{ matrix.asset }}.zip" -Force
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          # Prefer the .app bundle; fall back to the bare binary just in case.
+          if [ -d "Chroma Tool.app" ]; then
+            ditto -c -k --sequesterRsrc --keepParent "Chroma Tool.app" "../${{ matrix.asset }}.zip"
+          else
+            zip -j "../${{ matrix.asset }}.zip" chroma_tool
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}.zip
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: ${{ matrix.asset }}.zip

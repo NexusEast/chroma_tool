@@ -29,6 +29,7 @@ Workflow
 from __future__ import annotations
 
 import colorsys
+import json
 import os
 import sys
 import tkinter as tk
@@ -37,6 +38,17 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
+
+# Optional drag-and-drop: tkinterdnd2 isn't always available (e.g. EXE
+# builds without the wheel).  When it's missing we fall back to plain Tk
+# and skip wiring the drop target — the GUI still works as before.
+try:  # pragma: no cover — environment-dependent
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    _HAS_DND = True
+except Exception:  # pragma: no cover
+    DND_FILES = None  # type: ignore[assignment]
+    TkinterDnD = None  # type: ignore[assignment]
+    _HAS_DND = False
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
@@ -161,6 +173,9 @@ class App:
         self.naming_start_index = tk.IntVar(value=1)
         self.naming_zero_pad = tk.IntVar(value=0)
         self.batch_out_root = tk.StringVar(value="")
+        # True  → each image gets its own out_root/<stem>/ sub-folder.
+        # False → every crop is written straight into out_root.
+        self.batch_subfolder = tk.BooleanVar(value=True)
 
         for var in (self.naming_prefix, self.naming_start_index,
                     self.naming_zero_pad):
@@ -187,6 +202,11 @@ class App:
                       command=self._save_now)
         f.add_command(label=self.i18n.t("menu.reset_settings"),
                       command=self._reset_settings)
+        f.add_separator()
+        f.add_command(label=self.i18n.t("menu.export_config"),
+                      command=self.cmd_export_config)
+        f.add_command(label=self.i18n.t("menu.import_config"),
+                      command=self.cmd_import_config)
         f.add_separator()
         f.add_command(label=self.i18n.t("menu.exit"),
                       command=self._on_close)
@@ -218,7 +238,9 @@ class App:
                            (3, "menu.export"), (4, "menu.export_all"),
                            (6, "menu.clear_list"),
                            (8, "menu.save_settings"), (9, "menu.reset_settings"),
-                           (11, "menu.exit")]:
+                           (11, "menu.export_config"),
+                           (12, "menu.import_config"),
+                           (14, "menu.exit")]:
             try:
                 self._menu_file.entryconfig(index, label=self.i18n.t(key))
             except Exception:
@@ -299,6 +321,8 @@ class App:
         sb.pack(side="right", fill="y")
         self.image_listbox.pack(side="left", fill="both", expand=True)
         self.image_listbox.bind("<<ListboxSelect>>", self._on_image_select)
+        self._wire_drop_target(self.image_listbox)
+        self._wire_drop_target(list_frame)
 
         btns = ttk.Frame(parent)
         btns.pack(fill="x", pady=2)
@@ -358,6 +382,10 @@ class App:
         self.i18n.attach(b, "text", "btn.choose_out_root")
         b.pack(side="right")
 
+        sub_cb = ttk.Checkbutton(parent, variable=self.batch_subfolder)
+        self.i18n.attach(sub_cb, "text", "batch.subfolder")
+        sub_cb.pack(anchor="w", pady=(4, 0))
+
     # ─── preview canvas ─────────────────────────────────────────────
     def _build_preview(self, parent: ttk.Frame) -> None:
         self.canvas = tk.Canvas(parent, bg="#202020", highlightthickness=0)
@@ -411,15 +439,28 @@ class App:
             lbl.grid(row=row, column=0, columnspan=3, sticky="w", pady=(8, 2))
             row += 1
 
-        def slider(key: str, var: tk.Variable, lo: float, hi: float) -> None:
+        def slider(key: str, var: tk.Variable, lo: float, hi: float,
+                   step: float | None = None) -> None:
+            """A label + Scale + Spinbox row, all sharing one Tk variable.
+
+            ``step`` defaults to 1 for IntVar, 0.1 for DoubleVar.  The
+            Spinbox lets the user type an exact value; the Scale gives a
+            quick visual sweep.  Both stay in sync because they bind to
+            the same variable.
+            """
             nonlocal row
+            is_double = isinstance(var, tk.DoubleVar)
+            increment = step if step is not None else (0.1 if is_double else 1)
             lbl = ttk.Label(parent, width=22)
             self.i18n.attach(lbl, "text", key)
             lbl.grid(row=row, column=0, sticky="w")
-            ttk.Label(parent, textvariable=var, width=8).grid(
-                row=row, column=2, sticky="e")
             ttk.Scale(parent, from_=lo, to=hi, orient="horizontal",
                       variable=var).grid(row=row, column=1, sticky="ew", padx=4)
+            sp = ttk.Spinbox(parent, from_=lo, to=hi,
+                             increment=increment, width=8,
+                             textvariable=var,
+                             format="%.2f" if is_double else "%.0f")
+            sp.grid(row=row, column=2, sticky="e")
             row += 1
 
         def check(key: str, var: tk.Variable) -> None:
@@ -564,6 +605,141 @@ class App:
         self._set_dynamic(self.status_var, "status.settings_saved",
                           path=str(path))
 
+    # ─── parameter config import / export ───────────────────────────
+    def cmd_export_config(self) -> None:
+        """Write the current parameter widget state to a user-chosen JSON file.
+
+        This dumps a portable snapshot — keying / shadow / split params
+        plus the sampled bg colour — so the user can share or version
+        their tweaks.  Per-image profiles are not included; this is the
+        config of the *currently displayed* image.
+        """
+        path = filedialog.asksaveasfilename(
+            title=self.i18n.t("dialog.export_config"),
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), (self.i18n.t("file.types_all"), "*.*")],
+        )
+        if not path:
+            return
+        snapshot = self._snapshot_profile()
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(snapshot, fh, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            self._set_dynamic(self.status_var, "status.keyer_error",
+                              exc=str(exc))
+            return
+        self._set_dynamic(self.status_var, "status.config_saved", path=path)
+
+    def cmd_import_config(self) -> None:
+        """Load a JSON config file produced by :meth:`cmd_export_config`.
+
+        The user picks how it should interact with the existing per-image
+        profile store:
+
+        * **Current only** — only the active image (and the live widgets)
+          take the new values.  Other images keep their saved profile.
+        * **All images** — every entry in ``_profiles`` is overwritten,
+          which is what you want when you've found a config that works
+          across the whole batch.
+        * **Only images without a profile** — preserves manually tuned
+          images, but propagates the imported values to anything still
+          using the fallback.
+
+        This keeps the per-image profile system intact while giving the
+        user a single source-of-truth file they can ship between
+        machines.
+        """
+        path = filedialog.askopenfilename(
+            title=self.i18n.t("dialog.import_config"),
+            filetypes=[("JSON", "*.json"), (self.i18n.t("file.types_all"), "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                profile = json.load(fh)
+        except Exception as exc:
+            self._set_dynamic(self.status_var, "status.config_load_error",
+                              exc=str(exc))
+            return
+        if not isinstance(profile, dict):
+            self._set_dynamic(self.status_var, "status.config_load_error",
+                              exc="not a dict")
+            return
+
+        scope = self._ask_import_scope()
+        if scope is None:
+            return  # cancelled
+
+        # Always update live widgets so the user sees the new values.
+        self._apply_profile(profile)
+
+        if scope == "all":
+            for key in list(self._profiles.keys()):
+                self._profiles[key] = dict(profile)
+        elif scope == "missing":
+            # Leave images with explicit profiles alone.  Their fallback
+            # changes the next time they're loaded fresh — but the only
+            # visible knob right now is the live widget state.
+            pass
+        # "current": fall through, only the active widget state changed.
+
+        # Save the current image's profile so the change persists for it.
+        if self.active_path:
+            self._profiles[self.active_path] = self._snapshot_profile()
+        try:
+            save_profiles(self._profiles)
+        except Exception:
+            pass
+
+        self._refresh_listbox()
+        if self.current_index is not None:
+            self.image_listbox.selection_clear(0, tk.END)
+            self.image_listbox.selection_set(self.current_index)
+            self.image_listbox.activate(self.current_index)
+        self._process_current()
+        self._set_dynamic(self.status_var, "status.config_loaded", path=path)
+
+    def _ask_import_scope(self) -> str | None:
+        """Modal dialog: return "current" | "all" | "missing" | None (cancel)."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title(self.i18n.t("dialog.import_config"))
+        dlg.transient(self.root)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+
+        choice = tk.StringVar(value="current")
+        ttk.Label(dlg, text=self.i18n.t("dialog.import_scope_prompt"),
+                  wraplength=360).pack(padx=12, pady=(12, 6), anchor="w")
+        for value, key in (("current", "dialog.import_scope_current"),
+                           ("missing", "dialog.import_scope_missing"),
+                           ("all", "dialog.import_scope_all")):
+            ttk.Radiobutton(dlg, variable=choice, value=value,
+                            text=self.i18n.t(key)).pack(
+                anchor="w", padx=18, pady=2)
+
+        result: dict[str, str | None] = {"value": None}
+
+        def _ok() -> None:
+            result["value"] = choice.get()
+            dlg.destroy()
+
+        def _cancel() -> None:
+            result["value"] = None
+            dlg.destroy()
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill="x", padx=12, pady=12)
+        ttk.Button(btns, text=self.i18n.t("dialog.ok"), command=_ok).pack(
+            side="right", padx=4)
+        ttk.Button(btns, text=self.i18n.t("dialog.cancel"),
+                   command=_cancel).pack(side="right")
+        dlg.bind("<Return>", lambda _e: _ok())
+        dlg.bind("<Escape>", lambda _e: _cancel())
+        dlg.wait_window()
+        return result["value"]
+
     def _reset_settings(self) -> None:
         defaults = {
             "keying_on": True,
@@ -699,6 +875,41 @@ class App:
         if added and self.current_index is None:
             self._select_index(0)
         self._refresh_naming_preview()
+
+    # ─── drag & drop ────────────────────────────────────────────────
+    def _wire_drop_target(self, widget) -> None:
+        """Register ``widget`` as a drop target for image files / folders."""
+        if not _dnd_active(self.root):
+            return
+        try:
+            widget.drop_target_register(DND_FILES)  # type: ignore[attr-defined]
+            widget.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    def _on_drop(self, event) -> str:
+        raw = getattr(event, "data", "") or ""
+        # tkinterdnd2 returns a Tcl list of paths, paths-with-spaces
+        # are wrapped in {…}.  splitlist handles both.
+        try:
+            tokens = self.root.tk.splitlist(raw)
+        except Exception:
+            tokens = [raw]
+        collected: list[str] = []
+        for token in tokens:
+            path = token.strip()
+            if not path:
+                continue
+            if os.path.isdir(path):
+                collected.extend(iter_image_files(path))
+            elif os.path.isfile(path):
+                if path.lower().endswith(IMAGE_SUFFIXES):
+                    collected.append(path)
+        if collected:
+            self._append_paths(collected)
+            self._set_dynamic(self.status_var, "status.dropped",
+                              n=len(collected))
+        return "break"
 
     def _refresh_listbox(self) -> None:
         self.image_listbox.delete(0, tk.END)
@@ -1044,7 +1255,8 @@ class App:
             self.root.update_idletasks()
 
         result: BatchResult = batch_process(
-            self.image_paths, out_root, params_for, naming, progress)
+            self.image_paths, out_root, params_for, naming, progress,
+            per_image_subfolder=self.batch_subfolder.get())
 
         self._set_dynamic(self.status_var, "status.batch_done",
                           ok=result.ok_count, total=result.total,
@@ -1088,8 +1300,39 @@ def _checkerboard(h: int, w: int, tile: int = 16) -> np.ndarray:
     return bg.astype(np.float32)
 
 
-def main() -> None:
+def _make_root() -> tk.Tk:
+    """Create the Tk root and enable drag-and-drop when it's safe to.
+
+    We build a plain :class:`tk.Tk` and *then* try to load the native
+    ``tkdnd`` package into it, instead of constructing
+    ``TkinterDnD.Tk()`` directly.  tkinterdnd2 monkey-patches its
+    drop-target methods onto every widget at import time, so a plain root
+    gains full drag-and-drop the instant tkdnd loads.
+
+    Doing it this way matters on macOS: ``TkinterDnD.Tk()`` builds the
+    window first and only afterwards fails to load an incompatible tkdnd
+    (e.g. a Tcl 9 binary against a Tcl 8.6 interpreter — "incompatible
+    stubs mechanism").  Tearing that half-built window down can hard-crash
+    fragile Tk builds.  Loading the package into a plain root instead
+    never leaves a stray window and never needs a risky ``destroy()``: if
+    tkdnd can't load we simply keep a normal, drag-and-drop-less window.
+    """
     root = tk.Tk()
+    if _HAS_DND:
+        try:
+            root.TkdndVersion = TkinterDnD._require(root)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+    return root
+
+
+def _dnd_active(root: tk.Tk) -> bool:
+    """True when the native tkdnd package loaded into ``root``."""
+    return _HAS_DND and getattr(root, "TkdndVersion", None) is not None
+
+
+def main() -> None:
+    root = _make_root()
     try:
         from ctypes import windll
         windll.shcore.SetProcessDpiAwareness(1)

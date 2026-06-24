@@ -57,6 +57,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Reset to Defaults",
         "ja": "既定値に戻す",
     },
+    "menu.export_config": {
+        "zh": "导出参数配置…",
+        "en": "Export Parameters…",
+        "ja": "パラメータ設定を書き出す…",
+    },
+    "menu.import_config": {
+        "zh": "导入参数配置…",
+        "en": "Import Parameters…",
+        "ja": "パラメータ設定を読み込む…",
+    },
     "menu.language": {"zh": "语言", "en": "Language", "ja": "言語"},
     "menu.lang.zh": {
         "zh": "中文",
@@ -144,6 +154,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "zh": "{name}:暂无专属配置,沿用当前参数(下次「生成」后会被保存)",
         "en": "{name}: no saved profile yet — inheriting current parameters",
         "ja": "{name}:専用プロファイルなし — 現在のパラメータを引き継ぎます",
+    },
+    "status.dropped": {
+        "zh": "已从拖拽添加 {n} 张图像。",
+        "en": "Added {n} images via drag-and-drop.",
+        "ja": "ドラッグ＆ドロップで {n} 枚の画像を追加しました。",
+    },
+    "status.config_saved": {
+        "zh": "参数配置已保存到 {path}",
+        "en": "Parameter config saved to {path}",
+        "ja": "パラメータ設定を {path} に保存しました",
+    },
+    "status.config_loaded": {
+        "zh": "已加载参数配置({path})",
+        "en": "Loaded parameter config from {path}",
+        "ja": "パラメータ設定を読み込みました({path})",
+    },
+    "status.config_load_error": {
+        "zh": "无法加载配置:{exc}",
+        "en": "Could not load config: {exc}",
+        "ja": "設定を読み込めません:{exc}",
     },
 
     # Section headers
@@ -237,6 +267,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ja": "出力ルート",
     },
     "btn.choose_out_root": {"zh": "选择…", "en": "Choose…", "ja": "選択…"},
+    "batch.subfolder": {
+        "zh": "每张图单独子文件夹(取消勾选 = 全部导出到同一文件夹)",
+        "en": "Per-image sub-folder (uncheck = export all into one folder)",
+        "ja": "画像ごとにサブフォルダ(チェックを外す = すべて同じフォルダに書き出し)",
+    },
 
     # Keying toggle
     "toggle.remove_bg": {
@@ -414,9 +449,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ja": "* パラメータを変更したら「生成」をクリックして適用してください",
     },
     "hint.batch": {
-        "zh": "* 批量导出会把每张图的切割图放进以图像名命名的子文件夹",
-        "en": "* Batch export puts each image's crops into its own sub-folder",
-        "ja": "* バッチ書き出しでは画像名のサブフォルダに切り出し結果が保存されます",
+        "zh": "* 批量导出默认按图像名建子文件夹,可在左侧取消勾选以全部导出到同一文件夹",
+        "en": "* Batch export uses per-image sub-folders by default; uncheck on the left to flatten into one folder",
+        "ja": "* バッチ書き出しは既定で画像ごとのサブフォルダを使用します。左側のチェックを外すと1つのフォルダにまとめられます",
     },
 
     # Dialogs
@@ -472,6 +507,38 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Add image folder",
         "ja": "画像フォルダを追加",
     },
+    "dialog.export_config": {
+        "zh": "导出参数配置",
+        "en": "Export parameter config",
+        "ja": "パラメータ設定を書き出す",
+    },
+    "dialog.import_config": {
+        "zh": "导入参数配置",
+        "en": "Import parameter config",
+        "ja": "パラメータ設定を読み込む",
+    },
+    "dialog.import_scope_prompt": {
+        "zh": "如何应用此配置?",
+        "en": "How should this config be applied?",
+        "ja": "この設定をどのように適用しますか?",
+    },
+    "dialog.import_scope_current": {
+        "zh": "仅当前图像(其他图像保留各自的专属配置)",
+        "en": "Current image only (keep other images' profiles)",
+        "ja": "現在の画像のみ(他の画像の専用設定はそのまま)",
+    },
+    "dialog.import_scope_missing": {
+        "zh": "仅没有专属配置的图像 + 当前画像(更新回退默认)",
+        "en": "Only images without a profile + current image (update fallback)",
+        "ja": "専用設定が無い画像 + 現在の画像(フォールバックを更新)",
+    },
+    "dialog.import_scope_all": {
+        "zh": "覆盖全部图像的专属配置",
+        "en": "Overwrite every image's profile",
+        "ja": "すべての画像の専用設定を上書き",
+    },
+    "dialog.ok": {"zh": "确定", "en": "OK", "ja": "OK"},
+    "dialog.cancel": {"zh": "取消", "en": "Cancel", "ja": "キャンセル"},
 
     # File chooser
     "file.types_image": {"zh": "图像", "en": "Image", "ja": "画像"},

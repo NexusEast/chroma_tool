@@ -6,7 +6,8 @@ what stays here is genuinely global to the app:
 * the active language (``lang``)
 * naming pattern fields (``naming_prefix``, ``naming_start_index``,
   ``naming_zero_pad``)
-* the batch output root (``batch_out_root``)
+* the batch output root (``batch_out_root``) and whether batch export
+  uses per-image sub-folders (``batch_subfolder``)
 * the image list (``image_paths``) and the last-active image
   (``active_path``) so the GUI can restore the session on reopen
 
@@ -29,6 +30,7 @@ GLOBAL_VAR_NAMES: tuple[str, ...] = (
     "naming_start_index",
     "naming_zero_pad",
     "batch_out_root",
+    "batch_subfolder",
 )
 
 

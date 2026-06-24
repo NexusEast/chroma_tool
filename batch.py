@@ -1,7 +1,8 @@
 """Batch processing: apply parameters to many images.
 
-The result of every input image is written into its own sub-folder of
-the chosen output root, named after the input image's stem:
+By default the result of every input image is written into its own
+sub-folder of the chosen output root, named after the input image's
+stem:
 
     out_root/
     ├── inputA/
@@ -11,6 +12,16 @@ the chosen output root, named after the input image's stem:
     └── inputB/
         ├── inputB_1.png
         └── …
+
+Passing ``per_image_subfolder=False`` flattens everything into a single
+output folder instead, with a continuous naming index so files from
+different images never overwrite each other:
+
+    out_root/
+    ├── inputA_1.png
+    ├── inputA_2.png
+    ├── inputB_3.png
+    └── …
 
 The ``params`` argument of :func:`batch_process` accepts either a
 single :class:`ProcessParams` (apply that one config to every image)
@@ -22,7 +33,7 @@ No ``_preview.png`` is written.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Union
 
 from io_utils import imread_unicode, to_bgr_and_alpha
@@ -91,9 +102,8 @@ def _resolve_params(params: ParamsArg, path: str) -> ProcessParams:
     return params(path)
 
 
-def _process_one(input_path: str, out_root: str,
+def _process_one(input_path: str, out_dir: str,
                  params: ProcessParams, naming: NamingPattern) -> ItemResult:
-    out_dir = _output_dir_for(input_path, out_root)
     item = ItemResult(input_path=input_path, output_dir=out_dir)
     try:
         raw = imread_unicode(input_path)
@@ -112,21 +122,37 @@ def _process_one(input_path: str, out_root: str,
 
 def batch_process(input_paths: list[str], out_root: str,
                   params: ParamsArg, naming: NamingPattern,
-                  progress: ProgressCallback | None = None) -> BatchResult:
+                  progress: ProgressCallback | None = None,
+                  per_image_subfolder: bool = True) -> BatchResult:
     """Run :func:`pipeline.process_image` over each input path.
 
     ``params`` may be a single :class:`ProcessParams` (legacy single
     config) or a callable ``path -> ProcessParams`` so each image can
     use its own per-image profile.
+
+    When ``per_image_subfolder`` is True (the default) every image's
+    crops land in their own ``out_root/<stem>/`` sub-folder.  When it's
+    False all crops are written straight into ``out_root`` instead, and
+    the naming index runs continuously across images so files never
+    collide (e.g. ``icon_1.png``, ``icon_2.png``, ``icon_3.png`` …).
     """
     os.makedirs(out_root, exist_ok=True)
     aggregate = BatchResult()
     total = len(input_paths)
+    next_index = naming.start_index
     for index, path in enumerate(input_paths, start=1):
         if progress is not None:
             progress(index, total, os.path.basename(path))
         this_params = _resolve_params(params, path)
-        aggregate.items.append(
-            _process_one(path, out_root, this_params, naming))
+        if per_image_subfolder:
+            out_dir = _output_dir_for(path, out_root)
+            item_naming = naming
+        else:
+            out_dir = out_root
+            item_naming = replace(naming, start_index=next_index)
+        item = _process_one(path, out_dir, this_params, item_naming)
+        if not per_image_subfolder:
+            next_index += item.crop_count
+        aggregate.items.append(item)
     return aggregate
 

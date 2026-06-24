@@ -113,6 +113,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument("--out-root", required=True,
                          help="Directory under which each image gets a "
                               "named sub-folder.")
+    p_batch.add_argument("--flat", action="store_true",
+                         help="Write every crop straight into --out-root "
+                              "(no per-image sub-folder); naming index runs "
+                              "continuously so files never collide.")
     _add_keying_args(p_batch.add_argument_group("chroma key"))
     _add_split_args(p_batch.add_argument_group("split"))
     _add_naming_args(p_batch.add_argument_group("naming"))
@@ -234,7 +238,8 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     def progress(index: int, total: int, name: str) -> None:
         print(f"[{index}/{total}] {name}")
 
-    result = batch_process(inputs, args.out_root, params, naming, progress)
+    result = batch_process(inputs, args.out_root, params, naming, progress,
+                           per_image_subfolder=not args.flat)
     print(f"\nBatch done: {result.ok_count}/{result.total} images, "
           f"{result.total_crops} crops total → {args.out_root}")
     for failure in result.failures():
