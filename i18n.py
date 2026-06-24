@@ -20,9 +20,9 @@ from typing import Callable
 TRANSLATIONS: dict[str, dict[str, str]] = {
     # Window / menu
     "app.title": {
-        "zh": "Chroma Tool v2.0 — 抠图/切割/批处理工具",
-        "en": "Chroma Tool v2.0 — Background remover, splitter & batch tool",
-        "ja": "Chroma Tool v2.0 — 背景除去・分割・バッチ処理ツール",
+        "zh": "Chroma Tool v2.0.1 — 抠图/切割/批处理工具",
+        "en": "Chroma Tool v2.0.1 — Background remover, splitter & batch tool",
+        "ja": "Chroma Tool v2.0.1 — 背景除去・分割・バッチ処理ツール",
     },
     "menu.file": {"zh": "文件", "en": "File", "ja": "ファイル"},
     "menu.open": {"zh": "添加图像…", "en": "Add Images…", "ja": "画像を追加…"},
