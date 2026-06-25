@@ -20,9 +20,9 @@ from typing import Callable
 TRANSLATIONS: dict[str, dict[str, str]] = {
     # Window / menu
     "app.title": {
-        "zh": "Chroma Tool v2.0.1 — 抠图/切割/批处理工具",
-        "en": "Chroma Tool v2.0.1 — Background remover, splitter & batch tool",
-        "ja": "Chroma Tool v2.0.1 — 背景除去・分割・バッチ処理ツール",
+        "zh": "Chroma Tool v2.0.2 — 抠图/切割/批处理工具",
+        "en": "Chroma Tool v2.0.2 — Background remover, splitter & batch tool",
+        "ja": "Chroma Tool v2.0.2 — 背景除去・分割・バッチ処理ツール",
     },
     "menu.file": {"zh": "文件", "en": "File", "ja": "ファイル"},
     "menu.open": {"zh": "添加图像…", "en": "Add Images…", "ja": "画像を追加…"},
@@ -94,6 +94,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "zh": "在 ({x},{y}) 取色 → BGR={bgr}",
         "en": "Picked ({x},{y}) → BGR={bgr}",
         "ja": "({x},{y}) で取色 → BGR={bgr}",
+    },
+    "status.auto_done": {
+        "zh": "已自动估算参数:{notes}",
+        "en": "Auto-estimated parameters: {notes}",
+        "ja": "パラメータを自動推定しました:{notes}",
+    },
+    "status.auto_no_image": {
+        "zh": "请先添加并选择一张图像,再使用自动。",
+        "en": "Add and select an image first, then use Auto.",
+        "ja": "先に画像を追加・選択してから自動を使用してください。",
     },
     "status.exported": {
         "zh": "已导出 {n} 个切割图 → {dir}",
@@ -437,6 +447,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "zh": "生成 / 重新处理",
         "en": "Generate / Re-process",
         "ja": "生成 / 再処理",
+    },
+    "btn.auto_detect": {
+        "zh": "⚡ 自动(一键切图)",
+        "en": "⚡ Auto (one-click)",
+        "ja": "⚡ 自動(ワンクリック)",
+    },
+    "hint.auto_detect": {
+        "zh": "* 自动检测背景色并估算全部参数,无需手动调滑块;之后仍可微调",
+        "en": "* Auto-detects the background colour and estimates every "
+              "parameter — no manual tuning needed; you can still fine-tune after",
+        "ja": "* 背景色を自動検出し全パラメータを推定します。手動調整は不要で、"
+              "後から微調整も可能です",
     },
     "btn.pick_color": {
         "zh": "调色板取色…",

@@ -27,6 +27,7 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
+from autoparam import auto_params
 from batch import batch_process
 from io_utils import imread_unicode, imwrite_unicode, iter_image_files, to_bgr_and_alpha
 from keying import KeyingParams, sample_bgr, sample_hsv
@@ -38,6 +39,12 @@ from splitting import ContourParams, GridParams, HybridParams
 
 # ─── argparse builders ──────────────────────────────────────────────
 def _add_keying_args(group: argparse._ArgumentGroup) -> None:
+    group.add_argument("--auto", action="store_true",
+                       help="Auto-detect the background colour and estimate "
+                            "every keying/split parameter from the image "
+                            "(exact+hybrid). Explicit flags still override "
+                            "the estimate. In batch mode the estimate is "
+                            "taken from the first input image.")
     group.add_argument("--no-keying", action="store_true",
                        help="Skip background removal; use any existing alpha.")
     group.add_argument("--mode", choices=["exact", "area", "simple"],
@@ -198,8 +205,77 @@ def _expand_inputs(paths: list[str]) -> list[str]:
     return out
 
 
+# ─── auto parameter estimation ──────────────────────────────────────
+# Maps autoparam value keys → the argparse ``dest`` they should fill.
+_AUTO_KEY_TO_DEST: dict[str, str] = {
+    "mode": "mode",
+    "d_inner": "d_inner",
+    "d_outer": "d_outer",
+    "strict_d_inner": "strict_d_inner",
+    "strict_d_outer": "strict_d_outer",
+    "split_mode": "split",
+    "anchor_area": "anchor_area",
+    "min_area": "min_area",
+    "merge_distance": "merge_distance",
+    "shadow_distance": "shadow_distance",
+    "feather": "feather",
+    "padding": "padding",
+}
+
+# Maps argparse ``dest`` → the CLI flag(s) that set it, so we can tell
+# which estimates the user explicitly overrode on the command line.
+_DEST_TO_FLAGS: dict[str, tuple[str, ...]] = {
+    "mode": ("--mode",),
+    "d_inner": ("--d-inner",),
+    "d_outer": ("--d-outer",),
+    "strict_d_inner": ("--strict-d-inner",),
+    "strict_d_outer": ("--strict-d-outer",),
+    "split": ("--split",),
+    "anchor_area": ("--anchor-area",),
+    "min_area": ("--min-area",),
+    "merge_distance": ("--merge-distance",),
+    "shadow_distance": ("--shadow-distance",),
+    "feather": ("--feather",),
+    "padding": ("--padding",),
+    "bg": ("--bg",),
+}
+
+
+def _explicit_dests(argv: list[str]) -> set[str]:
+    """Return the set of dests the user set explicitly on ``argv``."""
+    present: set[str] = set()
+    for dest, flags in _DEST_TO_FLAGS.items():
+        if any(tok == f or tok.startswith(f + "=") for f in flags
+               for tok in argv):
+            present.add(dest)
+    return present
+
+
+def _apply_auto(args: argparse.Namespace, img_bgr, argv: list[str]
+                ) -> tuple[int, int, int] | None:
+    """Fill ``args`` with auto estimates; return the detected bg colour.
+
+    Only attributes the user did **not** pass explicitly are overwritten,
+    so ``--auto --d-outer 40`` keeps the hand-set 40.  Returns ``None``
+    when ``--auto`` is off or the estimate cannot be produced.
+    """
+    if not getattr(args, "auto", False) or img_bgr is None:
+        return None
+    result = auto_params(img_bgr)
+    explicit = _explicit_dests(argv)
+    for key, value in result.values.items():
+        dest = _AUTO_KEY_TO_DEST.get(key)
+        if dest is None or dest in explicit:
+            continue
+        setattr(args, dest, value)
+    print(f"Auto: {result.notes}")
+    if "bg" in explicit and args.bg is not None:
+        return tuple(int(c) for c in args.bg)
+    return result.bg_bgr
+
+
 # ─── commands ───────────────────────────────────────────────────────
-def _cmd_process(args: argparse.Namespace) -> int:
+def _cmd_process(args: argparse.Namespace, argv: list[str]) -> int:
     raw = imread_unicode(args.input)
     if raw is None:
         print(f"Failed to read {args.input}", file=sys.stderr)
@@ -208,7 +284,10 @@ def _cmd_process(args: argparse.Namespace) -> int:
     print(f"Input: {img_bgr.shape[1]}x{img_bgr.shape[0]}"
           f"{' (with alpha)' if existing_alpha is not None else ''}")
 
+    auto_bg = _apply_auto(args, img_bgr, argv)
     bg, hue = _bg_from_args(args, img_bgr)
+    if auto_bg is not None:
+        bg = auto_bg
     if bg is not None:
         print(f"Background BGR={bg}")
     params = _process_params_from_args(args, bg, hue)
@@ -223,7 +302,7 @@ def _cmd_process(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_batch(args: argparse.Namespace) -> int:
+def _cmd_batch(args: argparse.Namespace, argv: list[str]) -> int:
     inputs = _expand_inputs(args.inputs)
     if not inputs:
         print("No input images resolved.", file=sys.stderr)
@@ -231,7 +310,10 @@ def _cmd_batch(args: argparse.Namespace) -> int:
 
     first = imread_unicode(inputs[0])
     first_bgr, _ = to_bgr_and_alpha(first) if first is not None else (None, None)
+    auto_bg = _apply_auto(args, first_bgr, argv)
     bg, hue = _bg_from_args(args, first_bgr)
+    if auto_bg is not None:
+        bg = auto_bg
     params = _process_params_from_args(args, bg, hue)
     naming = _naming_from_args(args)
 
@@ -268,9 +350,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     args = parser.parse_args(argv)
     if args.command == "process":
-        return _cmd_process(args)
+        return _cmd_process(args, argv)
     if args.command == "batch":
-        return _cmd_batch(args)
+        return _cmd_batch(args, argv)
     parser.print_help()
     return 0
 

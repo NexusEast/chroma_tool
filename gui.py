@@ -54,6 +54,7 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
+from autoparam import auto_params, estimate_bg_bgr
 from batch import BatchResult, batch_process
 from i18n import DEFAULT_LANG, I18n
 from io_utils import (
@@ -288,6 +289,11 @@ class App:
         self.i18n.attach(gen, "text", "btn.generate")
         gen.pack(side="left", padx=2, ipadx=8, ipady=2)
 
+        auto = ttk.Button(parent, command=self.cmd_auto_detect,
+                          style="Accent.TButton")
+        self.i18n.attach(auto, "text", "btn.auto_detect")
+        auto.pack(side="left", padx=2, ipadx=8, ipady=2)
+
         exp_one = ttk.Button(parent, command=self.cmd_export_current)
         self.i18n.attach(exp_one, "text", "btn.export_current")
         exp_one.pack(side="left", padx=2, ipadx=4)
@@ -493,6 +499,17 @@ class App:
         self.i18n.attach(pick_btn, "text", "btn.pick_color")
         pick_btn.grid(row=row, column=0, columnspan=3, sticky="ew",
                       pady=(0, 4))
+        row += 1
+        auto_btn = ttk.Button(parent, command=self.cmd_auto_detect,
+                              style="Accent.TButton")
+        self.i18n.attach(auto_btn, "text", "btn.auto_detect")
+        auto_btn.grid(row=row, column=0, columnspan=3, sticky="ew",
+                      pady=(0, 2))
+        row += 1
+        auto_hint = ttk.Label(parent, foreground="#888", wraplength=320)
+        self.i18n.attach(auto_hint, "text", "hint.auto_detect")
+        auto_hint.grid(row=row, column=0, columnspan=3, sticky="w",
+                       pady=(0, 4))
         row += 1
         slider("slider.exact_d_inner", self.d_inner, 0, 80)
         slider("slider.exact_d_outer", self.d_outer, 1, 120)
@@ -961,10 +978,14 @@ class App:
             self._set_dynamic(self.status_var, "status.profile_loaded",
                               name=display)
         else:
-            if self.bg_bgr is None:
-                self.bg_bgr = tuple(int(c) for c in bgr[0, 0])
-                self._set_dynamic(self.bg_label, "bg.auto",
-                                  bgr=str(self.bg_bgr))
+            # New image (no saved profile): always re-derive the
+            # background colour from *this* image's border.  Re-using a
+            # stale colour from a previously processed image would key
+            # the wrong pixels — the bug behind "same params, different
+            # result" between sessions.
+            self.bg_bgr = estimate_bg_bgr(bgr)
+            self._set_dynamic(self.bg_label, "bg.auto",
+                              bgr=str(self.bg_bgr))
             self._set_dynamic(self.status_var, "status.profile_new",
                               name=display)
 
@@ -1103,6 +1124,41 @@ class App:
                           bgr=str(self.bg_bgr),
                           hsv=f"({h_},{s_},{v_})",
                           x="dialog", y="dialog")
+
+    def cmd_auto_detect(self) -> None:
+        """Estimate every parameter from the current image and apply them.
+
+        Detects the background colour off the image border, derives the
+        keying distance thresholds from the colour-distance histogram,
+        and sizes the splitter from connected-component statistics — then
+        pushes all of it into the widgets and re-processes.  Turns the
+        ~15-knob manual tune into a single click; the user can still
+        fine-tune any slider afterwards.
+        """
+        if self.current_img_bgr is None:
+            self._set_dynamic(self.status_var, "status.auto_no_image")
+            return
+        try:
+            result = auto_params(self.current_img_bgr)
+        except Exception as exc:
+            self._set_dynamic(self.status_var, "status.keyer_error",
+                              exc=str(exc))
+            return
+
+        self.bg_bgr = result.bg_bgr
+        self._set_dynamic(self.bg_label, "bg.auto", bgr=str(self.bg_bgr))
+        for name, value in result.values.items():
+            var = getattr(self, name, None)
+            if var is None:
+                continue
+            try:
+                var.set(value)
+            except Exception:
+                pass
+
+        self._process_current()
+        self._set_dynamic(self.status_var, "status.auto_done",
+                          notes=result.notes)
 
     def _on_canvas_click(self, event: tk.Event) -> None:
         if self.current_img_bgr is None or self._preview_scale <= 0:
