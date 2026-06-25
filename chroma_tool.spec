@@ -15,7 +15,7 @@ from pathlib import Path
 
 HERE = Path(SPECPATH).resolve()
 
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.1.1"
 
 # Optional drag-and-drop support.  tkinterdnd2 ships native tkdnd Tcl
 # binaries that must be collected explicitly; if the package isn't

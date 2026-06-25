@@ -33,7 +33,7 @@ import json
 import os
 import sys
 import tkinter as tk
-from tkinter import colorchooser, filedialog, messagebox, ttk
+from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
 
 import cv2
 import numpy as np
@@ -67,6 +67,7 @@ from pipeline import ProcessParams, ProcessResult, export_crops, process_image
 from profiles import (
     PROFILE_VAR_NAMES, load_profiles, normalise_key, save_profiles,
 )
+from presets import load_presets, save_presets
 from settings import (
     GLOBAL_VAR_NAMES, load_settings, save_settings, settings_path,
 )
@@ -87,6 +88,7 @@ class App:
         self.root = root
         self._stored = load_settings()
         self._profiles: dict[str, dict] = load_profiles()
+        self._presets: dict[str, dict] = load_presets()
         self.i18n = I18n(self._stored.get("lang", lang))
 
         # ─── data state ─────────────────────────────────────────────
@@ -100,6 +102,21 @@ class App:
         self._preview_imgtk: ImageTk.PhotoImage | None = None
         self._preview_scale: float = 1.0
         self._dynamic_state: list[tuple[tk.StringVar, str, dict]] = []
+
+        # ─── manual merge + canvas interaction state ────────────────
+        # Merge rectangles (image coords) for the active image; applied
+        # by the pipeline and persisted in the image's profile.
+        self.merge_groups: list[tuple[int, int, int, int]] = []
+        # "pick" = left-click samples bg colour (original behaviour);
+        # "select" = left click/drag selects crops to merge; right click on
+        #            a selected crop deselects it, right click on empty space
+        #            clears the whole selection, right drag deselects a box.
+        self.interact_mode: str = "pick"
+        self._selected_crops: set[int] = set()  # indices into last_result.crops
+        self._drag_start: tuple[int, int] | None = None  # canvas coords (left)
+        self._rubber_band: int | None = None  # canvas rectangle item id (left)
+        self._rdrag_start: tuple[int, int] | None = None  # canvas coords (right)
+        self._rubber_band_r: int | None = None  # canvas rectangle item id (right)
 
         # ─── build UI ───────────────────────────────────────────────
         root.geometry("1480x920")
@@ -119,6 +136,13 @@ class App:
     # ─── i18n state helpers ─────────────────────────────────────────
     def _refresh_title(self) -> None:
         self.root.title(self.i18n.t("app.title"))
+
+    def _refresh_mode_btn(self) -> None:
+        """Update the canvas-mode toggle's label for the current mode/lang."""
+        if not hasattr(self, "mode_btn"):
+            return
+        key = "btn.mode_pick" if self.interact_mode == "pick" else "btn.mode_select"
+        self.mode_btn.configure(text=self.i18n.t(key))
 
     def _set_dynamic(self, var: tk.StringVar, key: str, **kwargs) -> None:
         for i, (v, _k, _kw) in enumerate(self._dynamic_state):
@@ -166,6 +190,7 @@ class App:
         self.bridge_erode = tk.IntVar(value=0)
         self.strict_d_inner = tk.IntVar(value=30)
         self.strict_d_outer = tk.IntVar(value=50)
+        self.coalesce_distance = tk.IntVar(value=0)
         self.cell_w = tk.IntVar(value=200)
         self.cell_h = tk.IntVar(value=200)
 
@@ -294,6 +319,27 @@ class App:
         self.i18n.attach(auto, "text", "btn.auto_detect")
         auto.pack(side="left", padx=2, ipadx=8, ipady=2)
 
+        ttk.Separator(parent, orient="vertical").pack(
+            side="left", fill="y", padx=4, pady=2)
+
+        # Canvas-interaction tools: toggle between colour-picking and
+        # rubber-band crop selection, plus merge / clear of the selection.
+        self.mode_btn = ttk.Button(parent, command=self.cmd_toggle_interact_mode)
+        self.mode_btn.pack(side="left", padx=2, ipadx=4)
+        self._refresh_mode_btn()
+        self.i18n.add_listener(self._refresh_mode_btn)
+
+        merge_btn = ttk.Button(parent, command=self.cmd_merge_selected)
+        self.i18n.attach(merge_btn, "text", "btn.merge_selected")
+        merge_btn.pack(side="left", padx=2, ipadx=4)
+
+        clear_merge_btn = ttk.Button(parent, command=self.cmd_clear_merges)
+        self.i18n.attach(clear_merge_btn, "text", "btn.clear_merges")
+        clear_merge_btn.pack(side="left", padx=2, ipadx=4)
+
+        ttk.Separator(parent, orient="vertical").pack(
+            side="left", fill="y", padx=4, pady=2)
+
         exp_one = ttk.Button(parent, command=self.cmd_export_current)
         self.i18n.attach(exp_one, "text", "btn.export_current")
         exp_one.pack(side="left", padx=2, ipadx=4)
@@ -396,7 +442,14 @@ class App:
     def _build_preview(self, parent: ttk.Frame) -> None:
         self.canvas = tk.Canvas(parent, bg="#202020", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
-        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<Button-1>", self._on_canvas_press)
+        self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+        # Right button (select mode): drag to deselect, click on a merged
+        # region to undo that one merge.
+        self.canvas.bind("<Button-3>", self._on_canvas_press_right)
+        self.canvas.bind("<B3-Motion>", self._on_canvas_drag_right)
+        self.canvas.bind("<ButtonRelease-3>", self._on_canvas_release_right)
         self.canvas.bind("<Configure>", lambda _e: self._render_preview())
 
     # ─── parameters panel ───────────────────────────────────────────
@@ -483,6 +536,26 @@ class App:
             rb.grid(row=row, column=0, columnspan=3, sticky="w")
             row += 1
 
+        # ─── named presets ──────────────────────────────────────────
+        header("section.presets")
+        self.preset_choice = tk.StringVar(value="")
+        self.preset_combo = ttk.Combobox(parent, textvariable=self.preset_choice,
+                                         state="readonly")
+        self.preset_combo.grid(row=row, column=0, columnspan=3,
+                               sticky="ew", pady=(0, 2))
+        row += 1
+        preset_btns = ttk.Frame(parent)
+        preset_btns.grid(row=row, column=0, columnspan=3, sticky="ew",
+                         pady=(0, 4))
+        row += 1
+        for key, cmd in (("btn.save_preset", self.cmd_save_preset),
+                         ("btn.apply_preset_all", self.cmd_apply_preset_all),
+                         ("btn.delete_preset", self.cmd_delete_preset)):
+            b = ttk.Button(preset_btns, command=cmd)
+            self.i18n.attach(b, "text", key)
+            b.pack(side="left", padx=1, fill="x", expand=True)
+        self._refresh_preset_combo()
+
         # ─── keying toggle ──────────────────────────────────────────
         header("section.keying_toggle")
         check("toggle.remove_bg", self.keying_on)
@@ -509,6 +582,23 @@ class App:
         auto_hint = ttk.Label(parent, foreground="#888", wraplength=320)
         self.i18n.attach(auto_hint, "text", "hint.auto_detect")
         auto_hint.grid(row=row, column=0, columnspan=3, sticky="w",
+                       pady=(0, 4))
+        row += 1
+        # Prominent one-click granularity knob: drives how coarse Auto's
+        # output is.  Higher = merge more nearby pieces = fewer, chunkier
+        # crops; 0 = finest (current default).  Re-run Auto (or Generate)
+        # to apply.  Shares the coalesce_distance variable, so it also
+        # works as a live de-fragment slider in manual mode.
+        gran_hdr = ttk.Label(parent, font=("Segoe UI", 10, "bold"),
+                             foreground="#d08020")
+        self.i18n.attach(gran_hdr, "text", "section.granularity")
+        gran_hdr.grid(row=row, column=0, columnspan=3, sticky="w",
+                      pady=(4, 0))
+        row += 1
+        slider("slider.coalesce_distance", self.coalesce_distance, 0, 300)
+        gran_hint = ttk.Label(parent, foreground="#888", wraplength=320)
+        self.i18n.attach(gran_hint, "text", "hint.granularity")
+        gran_hint.grid(row=row, column=0, columnspan=3, sticky="w",
                        pady=(0, 4))
         row += 1
         slider("slider.exact_d_inner", self.d_inner, 0, 80)
@@ -771,6 +861,7 @@ class App:
             "min_area": 400, "padding": 4,
             "shadow_distance": 80, "bridge_erode": 0,
             "strict_d_inner": 30, "strict_d_outer": 50,
+            "coalesce_distance": 0,
             "cell_w": 200, "cell_h": 200,
             "naming_prefix": "", "naming_start_index": 1, "naming_zero_pad": 0,
         }
@@ -781,6 +872,8 @@ class App:
                     var.set(val)
                 except Exception:
                     pass
+        self.merge_groups = []
+        self._selected_crops.clear()
         self._set_dynamic(self.status_var, "status.settings_reset")
 
     def _on_close(self) -> None:
@@ -793,6 +886,10 @@ class App:
             save_profiles(self._profiles)
         except Exception:
             pass
+        try:
+            save_presets(self._presets)
+        except Exception:
+            pass
         self.root.destroy()
 
     # ─── per-image profile machinery ────────────────────────────────
@@ -801,6 +898,7 @@ class App:
         data: dict = {}
         if self.bg_bgr is not None:
             data["bg_bgr"] = list(self.bg_bgr)
+        data["merge_groups"] = [list(r) for r in self.merge_groups]
         for name in PROFILE_VAR_NAMES:
             var = getattr(self, name, None)
             if var is None:
@@ -818,6 +916,8 @@ class App:
             self.bg_bgr = (int(bg[0]), int(bg[1]), int(bg[2]))
             self._set_dynamic(self.bg_label, "bg.auto",
                               bgr=str(self.bg_bgr))
+        self.merge_groups = _coerce_merge_groups(profile.get("merge_groups"))
+        self._selected_crops.clear()
         for name in PROFILE_VAR_NAMES:
             if name not in profile:
                 continue
@@ -984,6 +1084,8 @@ class App:
             # the wrong pixels — the bug behind "same params, different
             # result" between sessions.
             self.bg_bgr = estimate_bg_bgr(bgr)
+            self.merge_groups = []
+            self._selected_crops.clear()
             self._set_dynamic(self.bg_label, "bg.auto",
                               bgr=str(self.bg_bgr))
             self._set_dynamic(self.status_var, "status.profile_new",
@@ -1002,6 +1104,8 @@ class App:
         self.current_img_bgr = None
         self.current_existing_alpha = None
         self.last_result = None
+        self.merge_groups = []
+        self._selected_crops.clear()
         self.canvas.delete("all")
 
     # ─── parameter extraction ───────────────────────────────────────
@@ -1018,6 +1122,7 @@ class App:
         "min_area": 400, "padding": 4,
         "shadow_distance": 80, "bridge_erode": 0,
         "strict_d_inner": 30, "strict_d_outer": 50,
+        "coalesce_distance": 0,
         "cell_w": 200, "cell_h": 200,
     }
 
@@ -1061,6 +1166,7 @@ class App:
         contour = ContourParams(min_area=g("min_area"),
                                 padding=g("padding"),
                                 mask_outside=keying_on)
+        merge_groups = _coerce_merge_groups(values.get("merge_groups"))
         return ProcessParams(
             keying_on=keying_on,
             keying=keying, shadows=shadows,
@@ -1068,6 +1174,8 @@ class App:
             hybrid=hybrid, grid=grid, contour=contour,
             strict_d_inner=float(g("strict_d_inner")),
             strict_d_outer=float(g("strict_d_outer")),
+            coalesce_distance=int(g("coalesce_distance")),
+            merge_groups=tuple(tuple(r) for r in merge_groups),
         )
 
     def _widget_values(self) -> dict:
@@ -1081,6 +1189,10 @@ class App:
                 values[name] = var.get()
             except Exception:
                 pass
+        # merge_groups isn't a tk.Variable; carry the live list so the
+        # current-widget ProcessParams applies the same manual merges the
+        # preview shows.
+        values["merge_groups"] = [list(r) for r in self.merge_groups]
         return values
 
     def _process_params(self) -> ProcessParams:
@@ -1180,6 +1292,166 @@ class App:
         self._set_dynamic(self.status_var, "status.picked",
                           x=x_img, y=y_img, bgr=str(self.bg_bgr))
 
+    # ─── canvas interaction (pick colour vs. select crops) ──────────
+    def cmd_toggle_interact_mode(self) -> None:
+        """Flip between colour-picking and rubber-band crop selection."""
+        self.interact_mode = ("select" if self.interact_mode == "pick"
+                              else "pick")
+        if self.interact_mode == "pick":
+            self._clear_rubber_band()
+        self._refresh_mode_btn()
+        key = ("status.mode_pick" if self.interact_mode == "pick"
+               else "status.mode_select")
+        self._set_dynamic(self.status_var, key)
+
+    def _clear_rubber_band(self) -> None:
+        if self._rubber_band is not None:
+            try:
+                self.canvas.delete(self._rubber_band)
+            except Exception:
+                pass
+            self._rubber_band = None
+        self._drag_start = None
+        if self._rubber_band_r is not None:
+            try:
+                self.canvas.delete(self._rubber_band_r)
+            except Exception:
+                pass
+            self._rubber_band_r = None
+        self._rdrag_start = None
+
+    def _on_canvas_press(self, event: tk.Event) -> None:
+        if self.interact_mode == "pick":
+            self._on_canvas_click(event)
+            return
+        # select mode: begin a rubber-band selection
+        self._drag_start = (event.x, event.y)
+        self._clear_rubber_band_rect_only()
+        self._rubber_band = self.canvas.create_rectangle(
+            event.x, event.y, event.x, event.y,
+            outline="#00ff66", width=2, dash=(4, 2))
+
+    def _clear_rubber_band_rect_only(self) -> None:
+        if self._rubber_band is not None:
+            try:
+                self.canvas.delete(self._rubber_band)
+            except Exception:
+                pass
+            self._rubber_band = None
+
+    def _on_canvas_drag(self, event: tk.Event) -> None:
+        if self.interact_mode != "select" or self._drag_start is None:
+            return
+        x0, y0 = self._drag_start
+        if self._rubber_band is not None:
+            self.canvas.coords(self._rubber_band, x0, y0, event.x, event.y)
+
+    def _on_canvas_release(self, event: tk.Event) -> None:
+        if self.interact_mode != "select" or self._drag_start is None:
+            return
+        x0, y0 = self._drag_start
+        x1, y1 = event.x, event.y
+        self._clear_rubber_band_rect_only()
+        self._drag_start = None
+        if self.last_result is None or self._preview_scale <= 0:
+            return
+        # Canvas → image coords; normalise so drag direction doesn't matter.
+        ix0 = min(x0, x1) / self._preview_scale
+        iy0 = min(y0, y1) / self._preview_scale
+        ix1 = max(x0, x1) / self._preview_scale
+        iy1 = max(y0, y1) / self._preview_scale
+        rect_w = ix1 - ix0
+        rect_h = iy1 - iy0
+        if rect_w < 2 and rect_h < 2:
+            # Bare click: select the single crop under the cursor.
+            for idx, crop in enumerate(self.last_result.crops):
+                bx, by, bw, bh = crop.bbox
+                if bx <= ix0 <= bx + bw and by <= iy0 <= by + bh:
+                    self._selected_crops.add(idx)
+                    break
+        else:
+            # Drag: select every crop the box touches.
+            sel_rect = (ix0, iy0, rect_w, rect_h)
+            for idx, crop in enumerate(self.last_result.crops):
+                if _rect_overlaps_bbox(sel_rect, crop.bbox):
+                    self._selected_crops.add(idx)
+        self._render_preview()
+        self._set_dynamic(self.status_var, "status.selected",
+                          n=len(self._selected_crops))
+
+    def _on_canvas_press_right(self, event: tk.Event) -> None:
+        if self.interact_mode != "select":
+            return
+        self._rdrag_start = (event.x, event.y)
+        if self._rubber_band_r is not None:
+            try:
+                self.canvas.delete(self._rubber_band_r)
+            except Exception:
+                pass
+        self._rubber_band_r = self.canvas.create_rectangle(
+            event.x, event.y, event.x, event.y,
+            outline="#ff5050", width=2, dash=(4, 2))
+
+    def _on_canvas_drag_right(self, event: tk.Event) -> None:
+        if self.interact_mode != "select" or self._rdrag_start is None:
+            return
+        x0, y0 = self._rdrag_start
+        if self._rubber_band_r is not None:
+            self.canvas.coords(self._rubber_band_r, x0, y0, event.x, event.y)
+
+    def _on_canvas_release_right(self, event: tk.Event) -> None:
+        """Right button in select mode: deselect crops.
+
+        Right-clicking a selected crop deselects just that crop.  Right-
+        clicking empty space (or a non-selected crop) clears the whole
+        selection.  A right-drag deselects every crop the box touches.
+        """
+        if self.interact_mode != "select" or self._rdrag_start is None:
+            return
+        x0, y0 = self._rdrag_start
+        x1, y1 = event.x, event.y
+        if self._rubber_band_r is not None:
+            try:
+                self.canvas.delete(self._rubber_band_r)
+            except Exception:
+                pass
+            self._rubber_band_r = None
+        self._rdrag_start = None
+        if self.last_result is None or self._preview_scale <= 0:
+            return
+
+        ix0 = min(x0, x1) / self._preview_scale
+        iy0 = min(y0, y1) / self._preview_scale
+        ix1 = max(x0, x1) / self._preview_scale
+        iy1 = max(y0, y1) / self._preview_scale
+        rect_w = ix1 - ix0
+        rect_h = iy1 - iy0
+
+        if rect_w < 2 and rect_h < 2:
+            # Bare click: deselect the crop under the cursor, else clear all.
+            hit = None
+            for idx in self._selected_crops:
+                if 0 <= idx < len(self.last_result.crops):
+                    bx, by, bw, bh = self.last_result.crops[idx].bbox
+                    if bx <= ix0 <= bx + bw and by <= iy0 <= by + bh:
+                        hit = idx
+                        break
+            if hit is not None:
+                self._selected_crops.discard(hit)
+            else:
+                self._selected_crops.clear()
+        else:
+            # Drag: deselect every selected crop the box touches.
+            sel_rect = (ix0, iy0, rect_w, rect_h)
+            for idx, crop in enumerate(self.last_result.crops):
+                if idx in self._selected_crops and _rect_overlaps_bbox(
+                        sel_rect, crop.bbox):
+                    self._selected_crops.discard(idx)
+
+        self._render_preview()
+        self._set_dynamic(self.status_var, "status.selected",
+                          n=len(self._selected_crops))
+
     # ─── processing & rendering ─────────────────────────────────────
     def cmd_generate(self) -> None:
         self._process_current()
@@ -1194,6 +1466,116 @@ class App:
             self._set_dynamic(self.status_var, "status.profile_saved",
                               name=display)
 
+    # ─── manual merge commands ──────────────────────────────────────
+    def cmd_merge_selected(self) -> None:
+        """Record a merge rectangle over the selected crops and re-process.
+
+        The union bbox of the selected crops becomes a persistent merge
+        group on the active image, so the merge survives re-processing,
+        slider tweaks and batch export.
+        """
+        if self.last_result is None:
+            return
+        if len(self._selected_crops) < 2:
+            self._set_dynamic(self.status_var, "status.merge_need_two")
+            return
+        crops = self.last_result.crops
+        boxes = [crops[i].bbox for i in self._selected_crops
+                 if 0 <= i < len(crops)]
+        if len(boxes) < 2:
+            self._set_dynamic(self.status_var, "status.merge_need_two")
+            return
+        x0 = min(b[0] for b in boxes)
+        y0 = min(b[1] for b in boxes)
+        x1 = max(b[0] + b[2] for b in boxes)
+        y1 = max(b[1] + b[3] for b in boxes)
+        self.merge_groups.append((int(x0), int(y0), int(x1 - x0), int(y1 - y0)))
+        self._selected_crops.clear()
+        self._save_active_profile()
+        self._process_current()
+        self._set_dynamic(self.status_var, "status.merged",
+                          n=len(self.merge_groups))
+
+    def cmd_clear_merges(self) -> None:
+        """Drop all manual merge groups on the active image and re-process."""
+        if not self.merge_groups:
+            self._set_dynamic(self.status_var, "status.merges_cleared")
+            return
+        self.merge_groups = []
+        self._selected_crops.clear()
+        self._save_active_profile()
+        self._process_current()
+        self._set_dynamic(self.status_var, "status.merges_cleared")
+
+    # ─── named-preset commands ──────────────────────────────────────
+    def _refresh_preset_combo(self) -> None:
+        if not hasattr(self, "preset_combo"):
+            return
+        names = sorted(self._presets.keys())
+        self.preset_combo.configure(values=names)
+        if self.preset_choice.get() not in names:
+            self.preset_choice.set(names[0] if names else "")
+
+    def cmd_save_preset(self) -> None:
+        """Save the current parameter set (incl. bg colour) as a named preset."""
+        name = simpledialog.askstring(
+            self.i18n.t("section.presets"),
+            self.i18n.t("dialog.preset_name_prompt"),
+            parent=self.root)
+        if name is None:
+            return
+        name = name.strip()
+        if not name:
+            return
+        self._presets[name] = self._snapshot_profile()
+        try:
+            save_presets(self._presets)
+        except Exception as exc:
+            self._set_dynamic(self.status_var, "status.keyer_error",
+                              exc=str(exc))
+            return
+        self._refresh_preset_combo()
+        self.preset_choice.set(name)
+        self._set_dynamic(self.status_var, "status.preset_saved", name=name)
+
+    def cmd_apply_preset_all(self) -> None:
+        """Apply the selected preset to the live widgets and every image."""
+        name = self.preset_choice.get().strip()
+        preset = self._presets.get(name)
+        if not preset:
+            self._set_dynamic(self.status_var, "status.preset_none")
+            return
+        # Live widgets + every existing per-image profile take the preset.
+        self._apply_profile(preset)
+        for key in list(self._profiles.keys()):
+            self._profiles[key] = dict(preset)
+        if self.active_path:
+            self._profiles[self.active_path] = self._snapshot_profile()
+        try:
+            save_profiles(self._profiles)
+        except Exception:
+            pass
+        self._refresh_listbox()
+        if self.current_index is not None:
+            self.image_listbox.selection_clear(0, tk.END)
+            self.image_listbox.selection_set(self.current_index)
+            self.image_listbox.activate(self.current_index)
+        self._process_current()
+        self._set_dynamic(self.status_var, "status.preset_applied", name=name)
+
+    def cmd_delete_preset(self) -> None:
+        name = self.preset_choice.get().strip()
+        if name not in self._presets:
+            self._set_dynamic(self.status_var, "status.preset_none")
+            return
+        del self._presets[name]
+        try:
+            save_presets(self._presets)
+        except Exception:
+            pass
+        self._refresh_preset_combo()
+        self._set_dynamic(self.status_var, "status.preset_deleted", name=name)
+
     def _process_current(self) -> None:
         if self.current_img_bgr is None:
             return
@@ -1206,6 +1588,9 @@ class App:
                               exc=str(exc))
             return
         self.last_result = result
+        # The crop list was just regenerated, so any prior selection
+        # indices no longer point at the same crops — drop them.
+        self._selected_crops.clear()
         self._set_dynamic(self.result_var, "result.count",
                           n=len(result.crops),
                           be=self.bridge_erode.get())
@@ -1223,9 +1608,12 @@ class App:
 
         for idx, crop in enumerate(self.last_result.crops, 1):
             x, y, ww, hh = crop.bbox
-            cv2.rectangle(blended, (x, y), (x + ww, y + hh), (0, 0, 255), 2)
+            # Selected crops (queued for merge) draw green; the rest red.
+            selected = (idx - 1) in self._selected_crops
+            colour = (0, 200, 0) if selected else (0, 0, 255)
+            cv2.rectangle(blended, (x, y), (x + ww, y + hh), colour, 2)
             cv2.putText(blended, str(idx), (x + 4, y + 22),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
 
         cw = self.canvas.winfo_width() or PREVIEW_MAX
         ch = self.canvas.winfo_height() or PREVIEW_MAX
@@ -1346,6 +1734,34 @@ class App:
 
 
 # ─── module-level helpers ───────────────────────────────────────────
+def _coerce_merge_groups(raw) -> list[tuple[int, int, int, int]]:
+    """Validate a stored ``merge_groups`` value into a list of int 4-tuples.
+
+    Tolerates missing / malformed data (old profiles, hand-edited JSON):
+    anything that isn't a clean ``[x, y, w, h]`` is skipped.
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[tuple[int, int, int, int]] = []
+    for item in raw:
+        if isinstance(item, (list, tuple)) and len(item) == 4:
+            try:
+                out.append((int(item[0]), int(item[1]),
+                            int(item[2]), int(item[3])))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _rect_overlaps_bbox(rect: tuple[float, float, float, float],
+                        bbox: tuple[int, int, int, int]) -> bool:
+    """True when selection ``rect`` (x, y, w, h) intersects crop ``bbox``."""
+    rx, ry, rw, rh = rect
+    bx, by, bw, bh = bbox
+    return not (bx >= rx + rw or rx >= bx + bw
+                or by >= ry + rh or ry >= by + bh)
+
+
 def _checkerboard(h: int, w: int, tile: int = 16) -> np.ndarray:
     """Return a light-grey checkerboard image of size ``(h, w, 3)``."""
     bg = np.full((h, w, 3), 200, dtype=np.uint8)

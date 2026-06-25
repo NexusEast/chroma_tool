@@ -44,6 +44,40 @@ FEATURES: list[dict[str, str]] = [
               " CLI の `--auto`)。",
     },
     {
+        "en": "**One-click granularity + manual merge.** A single prominent "
+              "*Fine ↔ Coarse* slider sets how chunky one-click Auto's output "
+              "is — drag it up to merge nearby pieces into fewer, bigger crops. "
+              "For anything Auto still gets wrong, a *Select* canvas mode lets "
+              "you click or box-select stray crops (right-click to deselect) "
+              "and merge them into one.  Manual merges are remembered per "
+              "image, so they survive re-processing, slider tweaks and batch "
+              "export.",
+        "zh": "**一键细碎度 + 手动合并。** 一个醒目的「细碎 ◄—► 整块」滑块控制"
+              "一键自动切图的细碎程度——往右拖即把临近碎块并成更少、更整的切块。"
+              "对自动仍切不好的地方,画布的「选块」模式可单击或框选零散切块"
+              "(右键取消选中)再合并成一个。手动合并随每张图记忆,重新处理、"
+              "调滑块、批量导出后依然保留。",
+        "ja": "**ワンクリック粒度 + 手動マージ。** 目立つ「細かい ◄—► 粗い」"
+              "スライダーでワンクリック自動の粒度を調整でき、右へ動かすと近接"
+              "断片をより少なく大きな切り出しに結合します。自動でうまくいかない"
+              "箇所は「選択」モードでクリックまたは範囲選択(右クリックで解除)"
+              "して 1 つにマージできます。手動マージは画像ごとに記憶され、再処理・"
+              "スライダー調整・バッチ書き出しでも保持されます。",
+    },
+    {
+        "en": "**Named parameter presets.** Save a whole tuned parameter set "
+              "(including the background colour) under a name, then apply it "
+              "to every image in the list with one click — ideal when a batch "
+              "shares one art style.  Presets persist between sessions.",
+        "zh": "**命名参数预设。** 把一整套调好的参数(含背景色)命名保存,再一键"
+              "套用到列表里所有图像——同一批同风格的图最省事。预设在多次启动"
+              "间保留。",
+        "ja": "**名前付きパラメータプリセット。** 調整したパラメータ一式(背景色"
+              "を含む)を名前を付けて保存し、リスト内の全画像にワンクリックで"
+              "適用できます。同じ画風のバッチに最適。プリセットは終了後も"
+              "保存されます。",
+    },
+    {
         "en": "**Batch processing.** Add dozens of images to the GUI (or "
               "pass a folder to the CLI), tune the parameters on one preview "
               "image, then export them all with the same config in one click.",

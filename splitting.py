@@ -117,6 +117,147 @@ def _sort_crops_reading_order(crops: list[Crop],
     return sorted(crops, key=lambda c: (c.bbox[1] // row_height, c.bbox[0]))
 
 
+# ─── crop merging (manual groups + fragment coalescing) ─────────────
+def _merge_member_crops(rgba: np.ndarray, members: list[Crop]) -> Crop:
+    """Combine ``members`` into a single crop covering their bbox union.
+
+    The patch is re-cut from ``rgba`` over the union rectangle so each
+    member keeps its own internal alpha; the (already-transparent)
+    background between members is harmless.  ``area`` counts opaque
+    pixels in the merged patch.
+    """
+    h_img, w_img = rgba.shape[:2]
+    x0 = min(c.bbox[0] for c in members)
+    y0 = min(c.bbox[1] for c in members)
+    x1 = max(c.bbox[0] + c.bbox[2] for c in members)
+    y1 = max(c.bbox[1] + c.bbox[3] for c in members)
+    x0 = max(0, x0)
+    y0 = max(0, y0)
+    x1 = min(w_img, x1)
+    y1 = min(h_img, y1)
+    patch = rgba[y0:y1, x0:x1].copy()
+    area = int((patch[:, :, 3] > 0).sum())
+    return Crop(image=patch, bbox=(x0, y0, x1 - x0, y1 - y0), area=area)
+
+
+def coalesce_nearby(rgba: np.ndarray, crops: list[Crop],
+                    distance: int) -> list[Crop]:
+    """Merge crops whose bounding boxes sit within ``distance`` of each other.
+
+    Unlike the hybrid splitter's anchor/fragment logic, this ignores blob
+    size entirely: any two crops with a bbox gap ``<= distance`` end up in
+    the same group.  It's the global "de-fragmentation" knob — ``distance
+    <= 0`` is a no-op that returns the input unchanged.
+    """
+    if distance <= 0 or len(crops) < 2:
+        return crops
+    n = len(crops)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        parent[find(i)] = find(j)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _bbox_gap(crops[i].bbox, crops[j].bbox) <= distance:
+                union(i, j)
+
+    groups: dict[int, list[Crop]] = {}
+    for idx, crop in enumerate(crops):
+        groups.setdefault(find(idx), []).append(crop)
+
+    out: list[Crop] = []
+    for members in groups.values():
+        if len(members) == 1:
+            out.append(members[0])
+        else:
+            out.append(_merge_member_crops(rgba, members))
+    return _sort_crops_reading_order(out)
+
+
+def _rects_intersect(a: tuple[int, int, int, int],
+                     b: tuple[int, int, int, int]) -> bool:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return not (bx >= ax + aw or ax >= bx + bw
+                or by >= ay + ah or ay >= by + bh)
+
+
+def _union_overlapping_rects(rects: list[tuple[int, int, int, int]]
+                             ) -> list[tuple[int, int, int, int]]:
+    """Collapse intersecting rectangles into their bounding unions.
+
+    Repeated manual selections can overlap; merging them first prevents a
+    crop from being pulled into two groups (which would double-merge).
+    """
+    remaining = [tuple(int(v) for v in r) for r in rects]
+    out: list[tuple[int, int, int, int]] = []
+    while remaining:
+        x, y, w, h = remaining.pop()
+        changed = True
+        while changed:
+            changed = False
+            keep: list[tuple[int, int, int, int]] = []
+            for other in remaining:
+                if _rects_intersect((x, y, w, h), other):
+                    ox, oy, ow, oh = other
+                    nx0 = min(x, ox)
+                    ny0 = min(y, oy)
+                    nx1 = max(x + w, ox + ow)
+                    ny1 = max(y + h, oy + oh)
+                    x, y, w, h = nx0, ny0, nx1 - nx0, ny1 - ny0
+                    changed = True
+                else:
+                    keep.append(other)
+            remaining = keep
+        out.append((x, y, w, h))
+    return out
+
+
+def _bbox_center_in(bbox: tuple[int, int, int, int],
+                    rect: tuple[int, int, int, int]) -> bool:
+    bx, by, bw, bh = bbox
+    cx = bx + bw / 2.0
+    cy = by + bh / 2.0
+    rx, ry, rw, rh = rect
+    return rx <= cx <= rx + rw and ry <= cy <= ry + rh
+
+
+def merge_crops_in_rects(rgba: np.ndarray, crops: list[Crop],
+                         rects: list[tuple[int, int, int, int]]
+                         ) -> list[Crop]:
+    """Force-merge crops whose centre falls inside each user-drawn rectangle.
+
+    Each rectangle collects every crop whose bbox centre lies within it; a
+    rectangle owning two or more crops merges them into one.  Crops not
+    claimed by any rectangle pass through unchanged.  Overlapping
+    rectangles are unioned first so no crop is merged twice.
+    """
+    if not rects or not crops:
+        return crops
+    merged_rects = _union_overlapping_rects(list(rects))
+    claimed: set[int] = set()
+    out: list[Crop] = []
+    for rect in merged_rects:
+        members = [crops[i] for i in range(len(crops))
+                   if i not in claimed and _bbox_center_in(crops[i].bbox, rect)]
+        if len(members) >= 2:
+            for i in range(len(crops)):
+                if i not in claimed and _bbox_center_in(crops[i].bbox, rect):
+                    claimed.add(i)
+            out.append(_merge_member_crops(rgba, members))
+    for i, crop in enumerate(crops):
+        if i not in claimed:
+            out.append(crop)
+    return _sort_crops_reading_order(out)
+
+
 # ─── hybrid split ───────────────────────────────────────────────────
 @dataclass
 class _Component:

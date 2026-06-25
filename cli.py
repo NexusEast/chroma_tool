@@ -83,6 +83,11 @@ def _add_split_args(group: argparse._ArgumentGroup) -> None:
     group.add_argument("--bridge-erode", type=int, default=0)
     group.add_argument("--strict-d-inner", type=float, default=30.0)
     group.add_argument("--strict-d-outer", type=float, default=50.0)
+    group.add_argument("--coalesce-distance", type=int, default=0,
+                       help="De-fragment crops: merge any whose bounding "
+                            "boxes sit within this many pixels of each other "
+                            "(0 = off). Size-agnostic, so it tames "
+                            "over-fragmented output even after --auto.")
     group.add_argument("--cell-w", type=int, default=200)
     group.add_argument("--cell-h", type=int, default=200)
     group.add_argument("--offset-x", type=int, default=0)
@@ -185,6 +190,7 @@ def _process_params_from_args(args: argparse.Namespace,
         contour=contour,
         strict_d_inner=args.strict_d_inner,
         strict_d_outer=args.strict_d_outer,
+        coalesce_distance=args.coalesce_distance,
     )
 
 

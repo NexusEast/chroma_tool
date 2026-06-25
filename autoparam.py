@@ -230,6 +230,11 @@ def auto_params(img_bgr: np.ndarray) -> AutoResult:
         "shadow_distance": int(np.clip(geom["merge_distance"], 40, 120)),
         "feather": 2,
         "padding": 4,
+        # NOTE: coalesce_distance is deliberately NOT set here.  It is the
+        # user-facing "granularity" knob (see the GUI slider below the Auto
+        # button): Auto preserves whatever the user dialled in rather than
+        # resetting it, so "drag slider → click Auto" yields the chosen
+        # coarseness.  Its default is 0 (current, most-fragmented behaviour).
     }
 
     notes = (f"bg={bg}  d_inner/outer={d_inner}/{d_outer}  "

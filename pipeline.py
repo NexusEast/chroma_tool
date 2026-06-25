@@ -27,6 +27,7 @@ from naming import NamingPattern
 from shadows import ShadowParams, apply as apply_shadows
 from splitting import (
     ContourParams, Crop, GridParams, HybridParams, SplitMode,
+    coalesce_nearby, merge_crops_in_rects,
     split_contour, split_grid, split_hybrid,
 )
 
@@ -44,6 +45,14 @@ class ProcessParams:
     contour: ContourParams = field(default_factory=ContourParams)
     strict_d_inner: float = 30.0
     strict_d_outer: float = 50.0
+    # Post-split de-fragmentation: merge crops whose bboxes sit within
+    # this many pixels of each other (0 = off).  A size-agnostic global
+    # knob that works even after Auto sizes every blob as its own anchor.
+    coalesce_distance: int = 0
+    # User-drawn merge rectangles (image coords); any crops whose centre
+    # falls inside one are force-merged.  Persisted per image so a manual
+    # merge survives re-processing, slider tweaks and batch export.
+    merge_groups: tuple[tuple[int, int, int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -116,6 +125,10 @@ def process_image(img_bgr: np.ndarray, params: ProcessParams,
         hybrid_params = replace(hybrid_params, mask_outside=False)
     runtime = replace(params, hybrid=hybrid_params)
     crops = _run_splitter(rgba, alpha, strict, runtime)
+    if params.coalesce_distance > 0:
+        crops = coalesce_nearby(rgba, crops, params.coalesce_distance)
+    if params.merge_groups:
+        crops = merge_crops_in_rects(rgba, crops, list(params.merge_groups))
     return ProcessResult(rgba=rgba, alpha=alpha, crops=crops)
 
 

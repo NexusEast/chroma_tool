@@ -20,9 +20,9 @@ from typing import Callable
 TRANSLATIONS: dict[str, dict[str, str]] = {
     # Window / menu
     "app.title": {
-        "zh": "Chroma Tool v2.0.2 — 抠图/切割/批处理工具",
-        "en": "Chroma Tool v2.0.2 — Background remover, splitter & batch tool",
-        "ja": "Chroma Tool v2.0.2 — 背景除去・分割・バッチ処理ツール",
+        "zh": "Chroma Tool v2.1.1 — 抠图/切割/批处理工具",
+        "en": "Chroma Tool v2.1.1 — Background remover, splitter & batch tool",
+        "ja": "Chroma Tool v2.1.1 — 背景除去・分割・バッチ処理ツール",
     },
     "menu.file": {"zh": "文件", "en": "File", "ja": "ファイル"},
     "menu.open": {"zh": "添加图像…", "en": "Add Images…", "ja": "画像を追加…"},
@@ -186,6 +186,58 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ja": "設定を読み込めません:{exc}",
     },
 
+    # Canvas mode / manual merge / presets
+    "status.mode_pick": {
+        "zh": "已切到「取色」模式:点击图像取背景色。",
+        "en": "Colour-pick mode: click the image to sample the background.",
+        "ja": "「取色」モード:画像をクリックして背景色を取得します。",
+    },
+    "status.mode_select": {
+        "zh": "已切到「选块」模式:左键单击/框选切块,右键点已选块取消选中,右键点空白处清空选择。",
+        "en": "Select mode: left click/drag to select; right-click a selected crop to deselect it, right-click empty space to clear all.",
+        "ja": "「選択」モード:左クリック/ドラッグで選択、選択済みを右クリックで解除、空白を右クリックで全解除。",
+    },
+    "status.selected": {
+        "zh": "已选中 {n} 个切块(绿框)。",
+        "en": "{n} crop(s) selected (green boxes).",
+        "ja": "{n} 個の切り出しを選択中(緑枠)。",
+    },
+    "status.merge_need_two": {
+        "zh": "请先在「选块」模式下框选至少 2 个切块再合并。",
+        "en": "Select at least 2 crops (in Select mode) before merging.",
+        "ja": "マージするには「選択」モードで 2 個以上選んでください。",
+    },
+    "status.merged": {
+        "zh": "已合并选中切块(当前共 {n} 个合并组,随该图保存)。",
+        "en": "Merged selected crops ({n} merge group(s), saved with this image).",
+        "ja": "選択した切り出しをマージしました(マージ群 {n} 個、画像に保存)。",
+    },
+    "status.merges_cleared": {
+        "zh": "已清除该图的全部手动合并。",
+        "en": "Cleared all manual merges for this image.",
+        "ja": "この画像の手動マージをすべて解除しました。",
+    },
+    "status.preset_saved": {
+        "zh": "已保存预设「{name}」。",
+        "en": "Saved preset \"{name}\".",
+        "ja": "プリセット「{name}」を保存しました。",
+    },
+    "status.preset_applied": {
+        "zh": "已将预设「{name}」应用到所有图像。",
+        "en": "Applied preset \"{name}\" to all images.",
+        "ja": "プリセット「{name}」を全画像に適用しました。",
+    },
+    "status.preset_deleted": {
+        "zh": "已删除预设「{name}」。",
+        "en": "Deleted preset \"{name}\".",
+        "ja": "プリセット「{name}」を削除しました。",
+    },
+    "status.preset_none": {
+        "zh": "请先选择一个预设。",
+        "en": "Select a preset first.",
+        "ja": "先にプリセットを選択してください。",
+    },
+
     # Section headers
     "section.image_list": {
         "zh": "图像列表(批量)",
@@ -207,6 +259,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Background colour",
         "ja": "背景色",
     },
+    "section.granularity": {
+        "zh": "⚡ 一键切图细碎度",
+        "en": "⚡ One-click granularity",
+        "ja": "⚡ ワンクリック粒度",
+    },
     "section.mask_mode": {
         "zh": "蒙版模式",
         "en": "Mask mode",
@@ -215,6 +272,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "section.shadow": {"zh": "阴影处理", "en": "Shadow handling", "ja": "影の処理"},
     "section.splitter": {"zh": "切割模式", "en": "Splitter", "ja": "分割モード"},
     "section.grid": {"zh": "网格模式", "en": "Grid mode", "ja": "グリッドモード"},
+    "section.presets": {
+        "zh": "参数预设(命名保存 / 一键套用全部)",
+        "en": "Parameter presets (save & apply to all)",
+        "ja": "パラメータプリセット(保存 / 全適用)",
+    },
     "section.result": {"zh": "结果", "en": "Result", "ja": "結果"},
 
     # Image list
@@ -364,6 +426,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Merge distance",
         "ja": "断片マージ距離",
     },
+    "slider.coalesce_distance": {
+        "zh": "细碎 ◄———► 整块",
+        "en": "Fine ◄———► Coarse",
+        "ja": "細かい ◄———► 粗い",
+    },
     "slider.min_area": {
         "zh": "最小保留面积",
         "en": "Min area",
@@ -453,12 +520,55 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "⚡ Auto (one-click)",
         "ja": "⚡ 自動(ワンクリック)",
     },
+    "btn.mode_pick": {
+        "zh": "🖱 模式:取色",
+        "en": "🖱 Mode: Pick",
+        "ja": "🖱 モード:取色",
+    },
+    "btn.mode_select": {
+        "zh": "🖱 模式:选块",
+        "en": "🖱 Mode: Select",
+        "ja": "🖱 モード:選択",
+    },
+    "btn.merge_selected": {
+        "zh": "合并选中",
+        "en": "Merge Selected",
+        "ja": "選択をマージ",
+    },
+    "btn.clear_merges": {
+        "zh": "清除合并",
+        "en": "Clear Merges",
+        "ja": "マージ解除",
+    },
+    "btn.save_preset": {
+        "zh": "保存为预设…",
+        "en": "Save Preset…",
+        "ja": "プリセット保存…",
+    },
+    "btn.apply_preset_all": {
+        "zh": "应用到全部",
+        "en": "Apply to All",
+        "ja": "全適用",
+    },
+    "btn.delete_preset": {
+        "zh": "删除",
+        "en": "Delete",
+        "ja": "削除",
+    },
     "hint.auto_detect": {
         "zh": "* 自动检测背景色并估算全部参数,无需手动调滑块;之后仍可微调",
         "en": "* Auto-detects the background colour and estimates every "
               "parameter — no manual tuning needed; you can still fine-tune after",
         "ja": "* 背景色を自動検出し全パラメータを推定します。手動調整は不要で、"
               "後から微調整も可能です",
+    },
+    "hint.granularity": {
+        "zh": "* 往右拖 = 切得更整(自动并合临近碎块);往左拖到 0 = 切得最碎。"
+              "改完后点「⚡自动」或「生成」生效。",
+        "en": "* Drag right = coarser (nearby pieces merge into one); drag to "
+              "0 = finest. Re-run ⚡Auto or Generate to apply.",
+        "ja": "* 右へ = 粗く(近接した断片を結合)、0 = 最も細かく。変更後は"
+              "「⚡自動」または「生成」で反映されます。",
     },
     "btn.pick_color": {
         "zh": "调色板取色…",
@@ -561,6 +671,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "dialog.ok": {"zh": "确定", "en": "OK", "ja": "OK"},
     "dialog.cancel": {"zh": "取消", "en": "Cancel", "ja": "キャンセル"},
+    "dialog.preset_name_prompt": {
+        "zh": "为这套参数预设起个名字(同名将覆盖):",
+        "en": "Name this parameter preset (same name overwrites):",
+        "ja": "このプリセットの名前を入力(同名は上書き):",
+    },
 
     # File chooser
     "file.types_image": {"zh": "图像", "en": "Image", "ja": "画像"},

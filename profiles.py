@@ -36,6 +36,7 @@ PROFILE_VAR_NAMES: tuple[str, ...] = (
     "anchor_area", "merge_distance", "min_area", "padding",
     "shadow_distance", "bridge_erode",
     "strict_d_inner", "strict_d_outer",
+    "coalesce_distance",
     "cell_w", "cell_h",
 )
 
