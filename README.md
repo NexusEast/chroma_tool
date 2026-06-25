@@ -55,34 +55,22 @@ Everything runs locally with OpenCV and NumPy.
 
 ## Headline features
 
-1. **Batch processing.**  Add dozens of images to the GUI (or pass a
-   folder to the CLI), tune the parameters on one preview image, then
-   export them all with the same config in one click.
-2. **Custom naming.**  Pick a prefix, a starting index, and the number
-   of zero-pad digits.  Default name is the input image's stem with a
-   running `_N` suffix: `myimage_1.png`, `myimage_2.png`, ….
-3. **Per-image output folders.**  Each input image's crops land in a
-   sub-folder named after the input image — no name collisions when
-   batching.
-4. **Shadow-preserving keying.**  A dual-alpha pipeline reassigns
-   shadow pixels to the nearest icon body via OpenCV's distance
-   transform, so drop-shadows stay attached to their parent sprite
-   instead of being eaten by the chroma mask.
-5. **Soft drop-shadow re-projection.**  Shadow pixels can be converted
-   from opaque background-colour to semi-transparent black so they
-   look natural on any new composite.
-6. **Three split strategies.**  Hybrid (connected components +
-   anchor/fragment merging), fixed grid, or external contour.
-7. **Three keying modes.**  Exact (BGR distance), area (HSV + large
-   connected blob), simple (pure HSV range).
-8. **No `_preview.png` clutter.**  Preview rendering is GUI-only; the
-   export folder contains only your crops (plus an optional
-   `_transparent.png` in single-image mode).
-9. **Trilingual GUI** — English (default), Chinese and Japanese,
-   switchable at runtime.
-10. **Persistent settings.**  Every slider and choice survives between
-    launches, stored as JSON in `%APPDATA%\ChromaTool\settings.json`
-    (or `~/.config/chromatool/settings.json` on Linux/macOS).
+<!-- FEATURES:START -->
+<!-- AUTO-GENERATED from docs/readme_features.py — edit there, not here. -->
+
+1. **One-click Auto.** Detects the background colour from the image border, derives every keying/splitting parameter from the colour-distance histogram and connected-component statistics, and fills in all the sliders — turning a ~15-knob manual tune into a single click.  You can still fine-tune afterwards (GUI button, or `--auto` on the CLI).
+2. **Batch processing.** Add dozens of images to the GUI (or pass a folder to the CLI), tune the parameters on one preview image, then export them all with the same config in one click.
+3. **Per-image profiles.** Switching images in the list loads that image's own saved parameters.  The key is the absolute path, so the same image in a different location is a separate profile.  Profiles persist between sessions.
+4. **Custom naming.** Pick a prefix, a starting index, and the number of zero-pad digits.  A blank prefix uses the input image's stem with a running `_N` suffix: `myimage_1.png`, `myimage_2.png`, ….
+5. **Per-image output folders.** Each input image's crops land in a sub-folder named after the input image — no name collisions when batching.
+6. **Shadow-preserving keying.** A dual-alpha pipeline reassigns shadow pixels to the nearest icon body via OpenCV's distance transform, so drop-shadows stay attached to their parent sprite instead of being eaten by the chroma mask.
+7. **Soft drop-shadow re-projection.** Shadow pixels can be converted from opaque background-colour to semi-transparent black so they look natural on any new composite.
+8. **Three split strategies.** Hybrid (connected components + anchor/fragment merging), fixed grid, or external contour.
+9. **Three keying modes.** Exact (BGR distance), area (HSV + large connected blob), simple (pure HSV range).
+10. **No `_preview.png` clutter.** Preview rendering is GUI-only; the export folder contains only your crops (plus an optional `_transparent.png` in single-image mode).
+11. **Trilingual GUI** — English (default), Chinese and Japanese, switchable at runtime.
+12. **Persistent settings.** Every slider and choice survives between launches, stored as JSON in `%APPDATA%\ChromaTool\settings.json` (or `~/.config/chromatool/settings.json` on Linux/macOS).
+<!-- FEATURES:END -->
 
 ## When to reach for this tool
 

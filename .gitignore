@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Chroma Tool: throwaway sample sheet generated for the README screenshot
+_sample_sheet.png
+
 # C extensions
 *.so
 

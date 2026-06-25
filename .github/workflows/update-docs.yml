@@ -1,0 +1,84 @@
+name: Update docs
+
+# Keep the README feature list and the GUI screenshot in sync with the
+# code.  On every push to main (that touches code/docs) we:
+#   1. render the canonical feature list (docs/readme_features.py) into
+#      all three READMEs between their FEATURES markers, and
+#   2. launch the real Tkinter GUI headlessly, load a synthetic sample
+#      sheet, run one-click Auto, and grab a fresh preview.png.
+# Any resulting changes are committed back to main with [skip ci] so the
+# bot's own commit does not retrigger this workflow.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'
+      - 'README.md'
+      - 'README.zh.md'
+      - 'README.ja.md'
+      - 'requirements.txt'
+      - '.github/workflows/update-docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install headless display tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb scrot fluxbox imagemagick fonts-dejavu-core
+
+      - name: Sync README feature lists
+        run: python scripts/sync_readme.py
+
+      - name: Generate sample sprite sheet
+        run: python scripts/gen_sample.py
+
+      - name: Capture GUI screenshot (headless)
+        run: |
+          # Start a virtual screen the size of the window, plus a light
+          # window manager so the Tk window is mapped and decorated
+          # consistently before we grab it.
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1500x940x24 >/tmp/xvfb.log 2>&1 &
+          sleep 2
+          fluxbox >/tmp/fluxbox.log 2>&1 &
+          sleep 2
+          python scripts/screenshot_gui.py
+
+      - name: Commit changes back to main
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Only the published artifacts — never the throwaway sample.
+          git add preview.png README.md README.zh.md README.ja.md
+          if git diff --cached --quiet; then
+            echo "No documentation changes to commit."
+          else
+            git commit -m "docs: sync README features + refresh screenshot [skip ci]"
+            git push origin HEAD:main
+          fi
